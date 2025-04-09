@@ -53,9 +53,26 @@ int main() {
 	printf("Waiting for a client to connect...\n");
 	client_addr_len = sizeof(client_addr);
 	
-	accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+	int new_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
 	printf("Client connected\n");
+
+	if (new_fd == -1)
+	{
+		printf("Error handling new connection: %s \n", strerror(errno));
+		return 1;
+	}
 	
+	char *buff = "HTTP/1.1 200 OK\r\n\r\n";
+	int sent = send(new_fd, (void *) buff, sizeof(buff), 0);
+
+	if (sent < 0)
+	{
+		printf("Failed sendind message: %s", strerror(errno));
+		return 1;
+	}
+
+	printf("Message sent!\n");
+
 	close(server_fd);
 
 	return 0;
