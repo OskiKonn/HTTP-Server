@@ -63,7 +63,7 @@ int main() {
 	}
 	
 	char *buff = "HTTP/1.1 200 OK\r\n\r\n";
-	int sent = send(new_fd, (void *) buff, sizeof(buff), 0);
+	int sent = send(new_fd, buff, strlen(buff), 0);
 
 	if (sent < 0)
 	{
