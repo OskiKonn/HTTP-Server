@@ -6,8 +6,11 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include "requests_structs.h"
 
-int handleRequest(int);
+char* extract_path(int);
+char* parse_path(char*, char*);
+enum http_request get_method_from_str(char* str);
 
 int main() {
 	// Disable output buffering
@@ -63,77 +66,95 @@ int main() {
 		return 1;
 	}
 
-	char* buff;
-	int bytes_sent;
+	char* url_path = extract_path(new_fd);
 
-	if (handleRequest(new_fd) != 0)
-		buff = "HTTP/1.1 404 Not Found\r\n\r\n";
-	else
-		buff = "HTTP/1.1 200 OK\r\n\r\n";
-		
-
-	bytes_sent = send(new_fd, buff, strlen(buff), 0);
-		
-	if (bytes_sent < 0)
+	if (strcmp(url_path, "-1") != 0)
 	{
-		printf("Failed sendind message: %s", strerror(errno));
-		return 1;
+		char response_body[256];
+		parse_path(url_path, response_body);
+		
+		int body_len = strlen(response_body);
+
+		char response_ok[1024];
+
+		snprintf(response_ok, sizeof(response_ok), "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", 
+				body_len, response_body);
+
+		int bytes_sent;
+		bytes_sent = send(new_fd, response_ok, strlen(response_ok), 0);
+			
+		if (bytes_sent < 0)
+		{
+			printf("Failed sending message: %s", strerror(errno));
+			return 1;
+		}
+
+		printf("\nMessage sent: %s\n", response_ok);
 	}
-	
-	/*
-	char *buff = "HTTP/1.1 200 OK\r\n\r\n";
-	int bytes_sent = send(new_fd, buff, strlen(buff), 0);
 
-	if (bytes_sent < 0)
-	{
-		printf("Failed sendind message: %s", strerror(errno));
-		return 1;
-	}
-	*/
-
-	printf("Message sent!\n");
-
+	close(new_fd);
 	close(server_fd);
 
 	return 0;
 }
 
-int handleRequest(int new_fd)
+char* extract_path(int new_fd)
 {
-	char buff[256], target[128];
-	char* token;
-	size_t i = 0;
-	ssize_t bytes_recvd = recv(new_fd, buff, 256, 0);
+	char buff[256];
+	ssize_t bytes_recvd = recv(new_fd, buff, 256, 0);	// Read from the socket and save it to buffer
 	
 	if (bytes_recvd == -1)
 	{
 		printf("Error reading message: %s", strerror(errno));
-		return -1;
+		return "-1";
 	}
 
-	token = strchr(buff, '/');
+	struct http_header request;
+	char *token;
 
-	if (token == NULL)
+	token = strtok(buff, " ");
+	printf("\nMETHOD: %s", token);
+	request.method = get_method_from_str(token);
+
+	token = strtok(0, " ");
+	request.url_path = token;
+	printf("\nPATH: %s\n", request.url_path);
+
+	return request.url_path;
+}
+
+char* parse_path(char* path, char* output)
+{
+	char _path[256];
+	char* token;
+	_path[sizeof(_path) - 1] = '\0';
+
+	strncpy(_path, path, sizeof(_path)); // Copy path to _path for strtok()
+
+	token = strtok(_path, "/");
+	printf("\nTOKEN: %s\n", token);
+
+	if (strncmp(token, "echo", 5) == 0)
 	{
-		printf("Invalid request, no URL");
-		return -1;
+		char* str = strtok(NULL, " ");
+		printf("\nSTRING: %s\n", str);
+		strcpy(output, str);
+		return output;
 	}
 
-	while (*token != ' ')
+	strncpy(output, token, sizeof(output));
+	return output;
+}
+
+enum http_request get_method_from_str(char* str)
+{
+	size_t methods_size = sizeof(methods) / sizeof(methods[0]);
+
+	for (size_t i = 0; i < methods_size; ++i)
 	{
-		target[i] = *token;
-		token++;
-		i++;
+		if (strcmp(str, methods[i].string) == 0)
+			return methods[i].method;
 	}
 
-	target[i] = '\0';
-	printf("Message: %s :: length : %d\n\n", target, strlen(target));
-
-	if (strcmp(target, "/") != 0)
-	{
-		printf("Invalid URL: %s", target);
-		return -1;
-	}
-
-	return 0;
+	return -1;
 }
