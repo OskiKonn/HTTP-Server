@@ -9,7 +9,9 @@
 #include "requests_structs.h"
 
 char* extract_path(int);
-char* parse_path(char*, char*);
+int parse_path(char*, char*);
+int respond_with_body(int, char*);
+int respond_not_found(int);
 enum http_request get_method_from_str(char* str);
 
 int main() {
@@ -71,25 +73,16 @@ int main() {
 	if (strcmp(url_path, "-1") != 0)
 	{
 		char response_body[256];
-		parse_path(url_path, response_body);
-		
-		int body_len = strlen(response_body);
 
-		char response_ok[1024];
-
-		snprintf(response_ok, sizeof(response_ok), "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", 
-				body_len, response_body);
-
-		int bytes_sent;
-		bytes_sent = send(new_fd, response_ok, strlen(response_ok), 0);
-			
-		if (bytes_sent < 0)
+		if (parse_path(url_path, response_body) == 0)
 		{
-			printf("Failed sending message: %s", strerror(errno));
-			return 1;
+			respond_with_body(new_fd, response_body);
+		}
+		else
+		{
+			respond_not_found(new_fd);
 		}
 
-		printf("\nMessage sent: %s\n", response_ok);
 	}
 
 	close(new_fd);
@@ -120,10 +113,17 @@ char* extract_path(int new_fd)
 	request.url_path = token;
 	printf("\nPATH: %s\n", request.url_path);
 
+	if (strcmp(request.url_path, "/") == 0)
+	{
+		char response_ok[] = "HTTP/1.1 200 OK\r\n\r\n";
+		send(new_fd, response_ok, strlen(response_ok), 0);
+		return "-1";
+	}
+
 	return request.url_path;
 }
 
-char* parse_path(char* path, char* output)
+int parse_path(char* path, char* output)
 {
 	char _path[256];
 	char* token;
@@ -139,11 +139,10 @@ char* parse_path(char* path, char* output)
 		char* str = strtok(NULL, " ");
 		printf("\nSTRING: %s\n", str);
 		strcpy(output, str);
-		return output;
+		return 0;
 	}
 
-	strncpy(output, token, sizeof(output));
-	return output;
+	return -1;
 }
 
 enum http_request get_method_from_str(char* str)
@@ -157,4 +156,34 @@ enum http_request get_method_from_str(char* str)
 	}
 
 	return -1;
+}
+
+int respond_with_body(int connection, char* body)
+{
+	int body_len = strlen(body);
+
+	char response_ok[1024];
+
+	snprintf(response_ok, sizeof(response_ok), "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", 
+			body_len, body);
+
+	int bytes_sent;
+	bytes_sent = send(connection, response_ok, strlen(response_ok), 0);
+		
+	if (bytes_sent < 0)
+	{
+		printf("Failed sending message: %s", strerror(errno));
+		return 1;
+	}
+
+	printf("\nMessage sent: %s\n", response_ok);
+	return bytes_sent;
+}
+
+int respond_not_found(int connection)
+{
+	char response_not_found[] = "HTTP/1.1 404 Not Found\r\n\r\n";
+	int bytes_sent = send(connection, response_not_found, strlen(response_not_found), 0);
+
+	return bytes_sent;
 }
