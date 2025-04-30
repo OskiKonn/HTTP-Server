@@ -4,6 +4,7 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <string.h>
+#include <strings.h>
 #include <errno.h>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -11,12 +12,15 @@
 #include "requests_structs.h"
 #include "defines.h"
 
-char* extract_path(char*, int);
+char* extract_path(char*, char*, int);
+char* get_header_content(char*, char headers[][256], int*, char*);
 int read_request(int, char*, size_t);
+int read_headers(char*, char dest[][256], size_t);
 int parse_path(char*, char*);
 int respond_with_body(int, char*);
 int respond_not_found(int);
 void on_connect(struct sockaddr_in* client);
+void print_headers(char headers[][256], int*);
 enum http_request get_method_from_str(char* str);
 
 int main() {
@@ -75,18 +79,38 @@ int main() {
 		return 1;
 	}
 
-	char data[256];
+	char data[256], url_path[1024];
+	char headers[MAX_HEADERS][256];
 	int data_ok = read_request(new_fd, data, sizeof(data));
-	char* url_path = extract_path(data, new_fd);
+	char* path_valid = extract_path(data,url_path, new_fd);
+	int headers_num = read_headers(data, headers, MAX_HEADERS);
+
+	if (headers_num > 0)
+	{
+		print_headers(headers, &headers_num);
+	}
 
 	if (strcmp(url_path, "-1") != 0)
 	{
-		char response_body[256];
+		char parsed[256];
+		int action = parse_path(url_path, parsed);
 
-		if (parse_path(url_path, response_body) == 0)	/* If clients calls /echo respond with a body (/echo/{body}) */
-			respond_with_body(new_fd, response_body);
-		else
-			respond_not_found(new_fd);
+		if (action == RESPOND_ECHO)	/* If clients calls /echo respond with a body (/echo/{body}) */
+			respond_with_body(new_fd, parsed);
+
+		else if (action == READ_HEADER)
+		{
+			char header_content[256];
+			char* header_ok = get_header_content(parsed, headers, &headers_num, header_content);
+
+			
+			if (header_ok)
+				respond_with_body(new_fd, header_content);
+			
+			else
+				respond_not_found(new_fd);
+			
+		}
 
 	}
 
@@ -100,7 +124,7 @@ int main() {
 		Returns '-1' if there is no path ("/") or if it failed to read the request
 		If it finds URL valid returns the path */
 
-char* extract_path(char *from_buffer, int connection)
+char* extract_path(char *from_buffer, char* dest, int connection)
 {
 	char buff[256];
 	strncpy(buff, from_buffer, sizeof(buff));
@@ -123,6 +147,7 @@ char* extract_path(char *from_buffer, int connection)
 		return "-1";
 	}
 
+	strcpy(dest, token);
 	return request.url_path;
 }
 
@@ -141,15 +166,18 @@ int parse_path(char* path, char* output)
 
 	token = strtok(_path, "/");
 
-	if (strncmp(token, "echo", 5) == 0)
+	if (token && strncmp(token, "echo", 5) == 0)
 	{
 		char* str = strtok(NULL, " ");
 		strcpy(output, str);	/* If client calss /echo copy the body value and set output to it */
 		return RESPOND_ECHO;
 	}
-
-	if (strncmp(token, "user-agent", 10) == 0)
-		return READ_USER_AGENT;
+	else
+	{
+		token = strtok(_path, " ");
+		strcpy(output, token + 1);
+		return READ_HEADER;
+	}
 
 	return -1;
 }
@@ -213,13 +241,43 @@ void on_connect(struct sockaddr_in *client)
 	printf("\nCONNECTED CLIENT INFO: \n\n\tIP: %s\n\tPORT: %d\n", client_ip, client_port);
 }
 
-char *read_header(char* data, int header)
+int read_headers(char* request, char dest[][256], size_t dest_size)
 {
 	char _data[256];
-	char *p_data;
-	strncpy(_data, data, sizeof(_data));
-	p_data = strtok(_data, "\n");
-	//TODO: header parsing
+	char *p_data, *h_start;
+	strncpy(_data, request, sizeof(_data));
+	p_data = strstr(_data, "\r\n");		// Step over request line
+	p_data += 2;
+	h_start = p_data;
+
+	size_t h_count = 0;
+
+	while (p_data && h_count < dest_size)
+	{
+		p_data = strstr(p_data, "\r\n");
+
+		if (p_data == NULL)
+		{
+			printf("\nReached end of request\n");
+			break;
+		}
+
+		int h_len = p_data - h_start;
+		strncpy(dest[h_count], h_start, h_len);
+		h_count++;
+
+		if (strncmp(p_data, "\r\n\r\n", 4) == 0)
+		{
+			printf("Reached end of headers\n");
+			break;
+		}
+
+		p_data += 2;
+		h_start = p_data;
+		
+	}
+	
+	return (int)h_count;
 	
 }
 
@@ -236,4 +294,47 @@ int read_request(int connection, char* dest_buffer, size_t max_bytes)
 
 	strncpy(dest_buffer, request_data, max_bytes);
 	return 0;
+}
+
+void print_headers(char headers[][256], int *count)
+{
+	printf("\n");
+
+	for (int i = 0; i < *count; ++i)
+	{
+		printf("%d: %s\n", i+1, headers[i]);
+	}
+
+	printf("\n");
+}
+
+char* get_header_content(char* header_type, char headers[][256], int *headers_count, char* dest)
+{
+	char* token;
+	char local_headers[*headers_count][256];
+
+	for (int i = 0; i < *headers_count; ++i)
+	{
+		strncpy(local_headers[i], headers[i], sizeof(local_headers[i]));
+	}
+
+	for (int i = 0; i < *headers_count; ++i)
+	{	
+		token = strtok(local_headers[i], " ");
+		// printf("\ngowno1: %s, %d\n", header_type, strlen(header_type));
+		// printf("\ngowno2: %s, %d\n", token, strlen(token) - 1);
+		
+		if (strncasecmp(token, header_type, strlen(token) - 1) == 0)
+		{
+			token = strtok(NULL, " ");
+			// printf("\ngowno3: %s\n", token);
+			strcpy(dest, token);
+			printf("\nFound header %s\n", header_type);
+			return token;
+		}
+	}
+
+	printf("\nDidn't found corresponding header\n");
+	return NULL;
+
 }

@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <defines.h>
 
 enum http_request
 {
@@ -25,7 +26,10 @@ struct pair_method_str
 
 
 struct pair_method_str methods[] = {
+
     {HTTP_REQUEST_GET, "GET"}, {HTTP_REQUEST_POST, "POST"},
     {HTTP_REQUEST_PUT, "PUT"}, {HTTP_REQUEST_PATCH, "PATCH"},
     {HTTP_REQUEST_DELETE, "DELETE"}
+
 };
+
